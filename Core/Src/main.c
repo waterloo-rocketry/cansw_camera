@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ov5640.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -72,6 +73,7 @@ static void MX_I2C1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint8_t fb[245760];
 /* USER CODE END 0 */
 
 /**
@@ -118,33 +120,37 @@ int main(void)
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET); // Set CAM_RESET high
   HAL_Delay(20);
 
-  uint8_t fb[262160] = {1};
+  FRESULT r = f_mount(&fatfs, "0:", 0);
+  if (r != FR_OK) {
+	  while (1);
+  }
+
   HAL_StatusTypeDef res = ov5640_init();
   if (res == HAL_OK) {
-	  HAL_Delay(20);
-	  __HAL_DCMI_ENABLE_IT(&hdcmi, DCMI_IT_FRAME);
-	  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb, 0xFFFF);
-	  HAL_Delay(200);
+	  for (uint8_t i = 0; i < 4; i++) {
+		  HAL_Delay(20);
+		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb, 0xf000);
+		  HAL_Delay(500);
+		  HAL_DMA_PollForTransfer(hdcmi.DMA_Handle, HAL_DMA_FULL_TRANSFER, 1000);
+		  //while (HAL_DMA_GetState(hdcmi.DMA_Handle) == HAL_DMA_STATE_BUSY);
 
-	  FRESULT r = f_mount(&fatfs, "", 0);
-	  if (r != FR_OK) {
-		  while (1);
+		  FIL file;
+		  char path[20];
+		  sprintf(path, "/image%1d.jpeg", i + 1);
+		  r = f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS);
+		  if (r != FR_OK) {
+			  while (1);
+		  }
+
+		  unsigned int retval;
+
+		  r = f_write(&file, fb, sizeof(fb), &retval);
+		  if (r != FR_OK) {
+			  while (1);
+		  }
+
+		  f_close(&file);
 	  }
-
-	  FIL file;
-	  r = f_open(&file, "image.jpeg", FA_WRITE | FA_CREATE_ALWAYS);
-	  if (r != FR_OK) {
-		  while (1);
-	  }
-
-	  unsigned int retval;
-
-	  r = f_write(&file, fb, sizeof(fb), &retval);
-	  if (r != FR_OK) {
-		  while (1);
-	  }
-
-	  f_close(&file);
   }
 
   /* USER CODE END 2 */
@@ -178,7 +184,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
@@ -192,7 +198,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 25;
+  RCC_OscInitStruct.PLL.PLLN = 50;
   RCC_OscInitStruct.PLL.PLLP = 2;
   RCC_OscInitStruct.PLL.PLLQ = 8;
   RCC_OscInitStruct.PLL.PLLR = 2;
@@ -211,13 +217,13 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
   RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -396,7 +402,7 @@ static void MX_SDMMC2_SD_Init(void)
   hsd2.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
   hsd2.Init.BusWide = SDMMC_BUS_WIDE_4B;
   hsd2.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
-  hsd2.Init.ClockDiv = 6;
+  hsd2.Init.ClockDiv = 8;
   /* USER CODE BEGIN SDMMC2_Init 2 */
 
   /* USER CODE END SDMMC2_Init 2 */

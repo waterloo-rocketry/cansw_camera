@@ -7,6 +7,8 @@
 
 HAL_StatusTypeDef ov5640_init();
 
+#define OV5640_REG_DLY 0xffff
+
 /**
   * @brief  OV5640 Registers
   */
@@ -33,6 +35,7 @@ HAL_StatusTypeDef ov5640_init();
 #define OV5640_PAD_SELECT01                        0x301DU
 #define OV5640_PAD_SELECT02                        0x301EU
 #define OV5640_CHIP_REVISION                       0x302AU
+#define OV5640_DRIVE_CAPABILITY                    0x302CU
 #define OV5640_PAD_CONTROL00                       0x301CU
 #define OV5640_SC_PWC                              0x3031U
 #define OV5640_SC_PLL_CONTRL0                      0x3034U
