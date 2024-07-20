@@ -130,9 +130,7 @@ int main(void)
 	  for (uint8_t i = 0; i < 4; i++) {
 		  HAL_Delay(20);
 		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb, 0xf000);
-		  HAL_Delay(500);
-		  HAL_DMA_PollForTransfer(hdcmi.DMA_Handle, HAL_DMA_FULL_TRANSFER, 1000);
-		  //while (HAL_DMA_GetState(hdcmi.DMA_Handle) == HAL_DMA_STATE_BUSY);
+		  HAL_DMA_PollForTransfer(hdcmi.DMA_Handle, HAL_DMA_FULL_TRANSFER, 200);
 
 		  FIL file;
 		  char path[20];

@@ -237,7 +237,7 @@ HAL_StatusTypeDef ov5640_init() {
 		    {0x558b, 0xf8},
 		    {0x501d, 0x40},// enable manual offset of contrast
 
-			{0x503d, 0x80}, // color bar test pattern
+			//{0x503d, 0x80}, // color bar test pattern
 
 		    //power on
 		    {0x3008, 0x02},
@@ -289,7 +289,7 @@ HAL_StatusTypeDef ov5640_init() {
 		}
 	}
 
-	ok |= ov5640_write_reg(OV5640_JPEG_CTRL07, 12 & 0x3f);
+	ok |= ov5640_write_reg(OV5640_JPEG_CTRL07, 10 & 0x3f);
 
 	// Default regs
 	// Framesize
