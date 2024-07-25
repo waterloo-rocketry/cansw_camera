@@ -201,17 +201,17 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief This function handles DMA2 stream7 global interrupt.
+  * @brief This function handles DMA2 stream0 global interrupt.
   */
-void DMA2_Stream7_IRQHandler(void)
+void DMA2_Stream0_IRQHandler(void)
 {
-  /* USER CODE BEGIN DMA2_Stream7_IRQn 0 */
+  /* USER CODE BEGIN DMA2_Stream0_IRQn 0 */
 
-  /* USER CODE END DMA2_Stream7_IRQn 0 */
+  /* USER CODE END DMA2_Stream0_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_dcmi);
-  /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
+  /* USER CODE BEGIN DMA2_Stream0_IRQn 1 */
 
-  /* USER CODE END DMA2_Stream7_IRQn 1 */
+  /* USER CODE END DMA2_Stream0_IRQn 1 */
 }
 
 /**
@@ -226,6 +226,20 @@ void DCMI_IRQHandler(void)
   /* USER CODE BEGIN DCMI_IRQn 1 */
 
   /* USER CODE END DCMI_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMAMUX1 overrun interrupt.
+  */
+void DMAMUX1_OVR_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMAMUX1_OVR_IRQn 0 */
+
+  /* USER CODE END DMAMUX1_OVR_IRQn 0 */
+
+  /* USER CODE BEGIN DMAMUX1_OVR_IRQn 1 */
+
+  /* USER CODE END DMAMUX1_OVR_IRQn 1 */
 }
 
 /**

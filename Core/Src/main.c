@@ -73,7 +73,7 @@ static void MX_I2C1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t fb[245760];
+uint8_t fb[262100];
 /* USER CODE END 0 */
 
 /**
@@ -127,14 +127,16 @@ int main(void)
 
   HAL_StatusTypeDef res = ov5640_init();
   if (res == HAL_OK) {
-	  for (uint8_t i = 0; i < 4; i++) {
+	  for (uint8_t i = 0; i < 100; i++) {
 		  HAL_Delay(20);
-		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb, 0xf000);
-		  HAL_DMA_PollForTransfer(hdcmi.DMA_Handle, HAL_DMA_FULL_TRANSFER, 200);
+		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb, 0xfff0);
+		  while ((DCMI->CR & DCMI_CR_CAPTURE) != 0);
+		  HAL_DMA_Abort(hdcmi.DMA_Handle);
+		  uint32_t length = (0xfff0 - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
 
 		  FIL file;
 		  char path[20];
-		  sprintf(path, "/image%1d.jpeg", i + 1);
+		  sprintf(path, "/image%06u.jpeg", (unsigned int)HAL_GetTick());
 		  r = f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS);
 		  if (r != FR_OK) {
 			  while (1);
@@ -142,7 +144,7 @@ int main(void)
 
 		  unsigned int retval;
 
-		  r = f_write(&file, fb, sizeof(fb), &retval);
+		  r = f_write(&file, fb, length, &retval);
 		  if (r != FR_OK) {
 			  while (1);
 		  }
@@ -151,13 +153,15 @@ int main(void)
 	  }
   }
 
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); // Set CAM_EN low
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
+	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
 	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
@@ -453,9 +457,12 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA2_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA2_Stream7_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMAMUX1_OVR_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMAMUX1_OVR_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMAMUX1_OVR_IRQn);
 
 }
 

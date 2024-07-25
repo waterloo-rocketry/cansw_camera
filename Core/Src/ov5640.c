@@ -289,7 +289,7 @@ HAL_StatusTypeDef ov5640_init() {
 		}
 	}
 
-	ok |= ov5640_write_reg(OV5640_JPEG_CTRL07, 10 & 0x3f);
+	ok |= ov5640_write_reg(OV5640_JPEG_CTRL07, 16 & 0x3f);
 
 	// Default regs
 	// Framesize
