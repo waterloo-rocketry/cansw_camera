@@ -74,7 +74,9 @@ static void MX_I2C1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t fb[262100];
+uint8_t fb_a[131072];
+uint8_t fb_b[131072];
+const size_t BUF_SIZE = 0x7ff0;
 
 void can_callback_function(const can_msg_t *message, uint32_t) {}
 /* USER CODE END 0 */
@@ -130,35 +132,61 @@ int main(void)
 	  while (1);
   }
 
+  // count the number of flies in the root directory of the SD card
+  uint16_t root_dir_files = 0;
+  DIR dir;
+  if (f_opendir(&dir, "/") != FR_OK) {
+	 while (1);
+  }
+
+  FILINFO finfo;
+  while (f_readdir(&dir, &finfo) == FR_OK && finfo.fname[0] != '\0') {
+	  root_dir_files++;
+  }
+  f_closedir(&dir);
+
   HAL_StatusTypeDef res = ov5640_init();
   if (res == HAL_OK) {
+	  FIL file;
+	  char path[20];
+	  sprintf(path, "/mov%04u.mjpg", root_dir_files);
+	  r = f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS);
+	  if (r != FR_OK) {
+		  while (1);
+	  }
+
+	  uint32_t length = 0;
+	  unsigned int retval;
+      can_msg_t board_stat_msg;
+
 	  for (uint8_t i = 0; i < 100; i++) {
-		  HAL_Delay(20);
-		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb, 0xfff0);
+		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb_a, BUF_SIZE);
+		  r = f_write(&file, fb_b, length, &retval);
+		  if (r != FR_OK) {
+			  while (1);
+		  }
 		  while ((DCMI->CR & DCMI_CR_CAPTURE) != 0);
 		  HAL_DMA_Abort(hdcmi.DMA_Handle);
-		  uint32_t length = (0xfff0 - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
+		  length = (BUF_SIZE - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
 
-		  FIL file;
-		  char path[20];
-		  sprintf(path, "/image%06u.jpeg", (unsigned int)HAL_GetTick());
-		  r = f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS);
+		  build_board_stat_msg(HAL_GetTick(), E_NOMINAL, NULL, 0, &board_stat_msg);
+		  can_send(&board_stat_msg);
+
+
+		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb_b, BUF_SIZE);
+		  r = f_write(&file, fb_a, length, &retval);
 		  if (r != FR_OK) {
 			  while (1);
 		  }
+		  while ((DCMI->CR & DCMI_CR_CAPTURE) != 0);
+		  HAL_DMA_Abort(hdcmi.DMA_Handle);
+		  length = (BUF_SIZE - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
 
-		  unsigned int retval;
-
-		  r = f_write(&file, fb, length, &retval);
-		  if (r != FR_OK) {
-			  while (1);
-		  }
-
-		  f_close(&file);
-      can_msg_t board_stat_msg;
-		  build_board_stat_msg(0, E_NOMINAL, NULL, 0, &board_stat_msg);
+		  build_board_stat_msg(HAL_GetTick(), E_ILLEGAL_CAN_MSG, NULL, 0, &board_stat_msg);
 		  can_send(&board_stat_msg);
 	  }
+
+	  f_close(&file);
   }
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); // Set CAM_EN low
@@ -170,6 +198,9 @@ int main(void)
   while (1)
   {
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
+	  can_msg_t board_stat_msg;
+	  build_board_stat_msg(0, E_SEGFAULT, NULL, 0, &board_stat_msg);
+	  can_send(&board_stat_msg);
 	  HAL_Delay(500);
     /* USER CODE END WHILE */
 
@@ -468,9 +499,6 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream0_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
-  /* DMAMUX1_OVR_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMAMUX1_OVR_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMAMUX1_OVR_IRQn);
 
 }
 

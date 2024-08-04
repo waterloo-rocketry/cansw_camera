@@ -96,7 +96,7 @@ HAL_StatusTypeDef ov5640_init() {
 
 		    //isp control
 		    {0x5000, 0xa7},
-		    {OV5640_ISP_CONTROL01, 0xa3},//+scaling?
+		    {OV5640_ISP_CONTROL01, 0x83},//no +scaling, 0xa3 for +scaling
 		    {0x5003, 0x08},//special_effect
 
 		    //unknown
@@ -260,21 +260,23 @@ HAL_StatusTypeDef ov5640_init() {
 		}
 	}
 
+	// Framsize / image options
 	ok |= ov5640_write_addr_reg(OV5640_TIMING_HS_HIGH, 0, 240);
 	ok |= ov5640_write_addr_reg(OV5640_TIMING_HW_HIGH, 2623, 1711);
-	ok |= ov5640_write_addr_reg(OV5640_TIMING_DVPHO_HIGH, 1920, 1080);
-	ok |= ov5640_write_addr_reg(OV5640_TIMING_HTS_HIGH, 2844, 1488);
-	ok |= ov5640_write_addr_reg(OV5640_TIMING_HOFFSET_HIGH, 32, 16);
+	ok |= ov5640_write_addr_reg(OV5640_TIMING_DVPHO_HIGH, 1280, 720);
+	ok |= ov5640_write_addr_reg(OV5640_TIMING_HTS_HIGH, 2844 - 200, 1488/2);
+	ok |= ov5640_write_addr_reg(OV5640_TIMING_HOFFSET_HIGH, 32/2, 16/2);
 	// ISP_CONTROL_0 scaling already enabled
-	ok |= ov5640_write_reg(OV5640_TIMING_TC_REG20, 0x40);
-	ok |= ov5640_write_reg(OV5640_TIMING_TC_REG21, 0x20);
-	ok |= ov5640_write_reg(0x4514, 0x88);
-	ok |= ov5640_write_reg(0x4520, 0x10);
-	ok |= ov5640_write_reg(OV5640_TIMING_X_INC, 0x11);//odd:1, even: 1
-	ok |= ov5640_write_reg(OV5640_TIMING_Y_INC, 0x11);//odd:1, even: 1
-	ok |= set_pll(0, 160, 4, 2, 0, 2, 1, 4);
+	ok |= ov5640_write_reg(OV5640_TIMING_TC_REG20, 0x01);
+	ok |= ov5640_write_reg(OV5640_TIMING_TC_REG21, 0x21);
+	ok |= ov5640_write_reg(0x4514, 0xaa);
+	ok |= ov5640_write_reg(0x4520, 0x0b);
+	ok |= ov5640_write_reg(OV5640_TIMING_X_INC, 0x31);//odd:3, even: 1
+	ok |= ov5640_write_reg(OV5640_TIMING_Y_INC, 0x31);//odd:3, even: 1
+	ok |= set_pll(0, 200, 4, 2, 0, 2, 1, 4);
     //Set PLL: bypass: 0, multiplier: 200, sys_div: 4, pre_div: 2, root_2x: 0, pclk_root_div: 2, pclk_manual: 1, pclk_div: 4
 
+	// Pixfmt
 	static const uint16_t sensor_fmt_jpeg[][2] = {
 	    {OV5640_FORMAT_MUX_CTRL, 0x00}, // YUV422
 	    {OV5640_FORMAT_CTRL00, 0x30}, // YUYV
@@ -289,13 +291,8 @@ HAL_StatusTypeDef ov5640_init() {
 		}
 	}
 
-	ok |= ov5640_write_reg(OV5640_JPEG_CTRL07, 16 & 0x3f);
-
-	// Default regs
-	// Framesize
-	// Pixfmt
 	// Quality
-
+	ok |= ov5640_write_reg(OV5640_JPEG_CTRL07, 8 & 0x3f);
 
 	return ok;
 }
