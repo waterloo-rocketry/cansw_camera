@@ -72,9 +72,134 @@ void HAL_MspInit(void)
 
   /* System interrupt init*/
 
+  /** Enable the VREF clock
+  */
+  __HAL_RCC_VREF_CLK_ENABLE();
+
+  /** Disable the Internal Voltage Reference buffer
+  */
+  HAL_SYSCFG_DisableVREFBUF();
+
+  /** Configure the internal voltage reference buffer high impedance mode
+  */
+  HAL_SYSCFG_VREFBUF_HighImpedanceConfig(SYSCFG_VREFBUF_HIGH_IMPEDANCE_ENABLE);
+
   /* USER CODE BEGIN MspInit 1 */
 
   /* USER CODE END MspInit 1 */
+}
+
+static uint32_t HAL_RCC_ADC12_CLK_ENABLED=0;
+
+/**
+* @brief ADC MSP Initialization
+* This function configures the hardware resources used in this example
+* @param hadc: ADC handle pointer
+* @retval None
+*/
+void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(hadc->Instance==ADC1)
+  {
+  /* USER CODE BEGIN ADC1_MspInit 0 */
+
+  /* USER CODE END ADC1_MspInit 0 */
+    /* Peripheral clock enable */
+    HAL_RCC_ADC12_CLK_ENABLED++;
+    if(HAL_RCC_ADC12_CLK_ENABLED==1){
+      __HAL_RCC_ADC12_CLK_ENABLE();
+    }
+
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    /**ADC1 GPIO Configuration
+    PC0     ------> ADC1_INP10
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN ADC1_MspInit 1 */
+
+  /* USER CODE END ADC1_MspInit 1 */
+  }
+  else if(hadc->Instance==ADC2)
+  {
+  /* USER CODE BEGIN ADC2_MspInit 0 */
+
+  /* USER CODE END ADC2_MspInit 0 */
+    /* Peripheral clock enable */
+    HAL_RCC_ADC12_CLK_ENABLED++;
+    if(HAL_RCC_ADC12_CLK_ENABLED==1){
+      __HAL_RCC_ADC12_CLK_ENABLE();
+    }
+
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    /**ADC2 GPIO Configuration
+    PC1     ------> ADC2_INP11
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN ADC2_MspInit 1 */
+
+  /* USER CODE END ADC2_MspInit 1 */
+  }
+
+}
+
+/**
+* @brief ADC MSP De-Initialization
+* This function freeze the hardware resources used in this example
+* @param hadc: ADC handle pointer
+* @retval None
+*/
+void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
+{
+  if(hadc->Instance==ADC1)
+  {
+  /* USER CODE BEGIN ADC1_MspDeInit 0 */
+
+  /* USER CODE END ADC1_MspDeInit 0 */
+    /* Peripheral clock disable */
+    HAL_RCC_ADC12_CLK_ENABLED--;
+    if(HAL_RCC_ADC12_CLK_ENABLED==0){
+      __HAL_RCC_ADC12_CLK_DISABLE();
+    }
+
+    /**ADC1 GPIO Configuration
+    PC0     ------> ADC1_INP10
+    */
+    HAL_GPIO_DeInit(GPIOC, GPIO_PIN_0);
+
+  /* USER CODE BEGIN ADC1_MspDeInit 1 */
+
+  /* USER CODE END ADC1_MspDeInit 1 */
+  }
+  else if(hadc->Instance==ADC2)
+  {
+  /* USER CODE BEGIN ADC2_MspDeInit 0 */
+
+  /* USER CODE END ADC2_MspDeInit 0 */
+    /* Peripheral clock disable */
+    HAL_RCC_ADC12_CLK_ENABLED--;
+    if(HAL_RCC_ADC12_CLK_ENABLED==0){
+      __HAL_RCC_ADC12_CLK_DISABLE();
+    }
+
+    /**ADC2 GPIO Configuration
+    PC1     ------> ADC2_INP11
+    */
+    HAL_GPIO_DeInit(GPIOC, GPIO_PIN_1);
+
+  /* USER CODE BEGIN ADC2_MspDeInit 1 */
+
+  /* USER CODE END ADC2_MspDeInit 1 */
+  }
+
 }
 
 /**
@@ -257,6 +382,13 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
     GPIO_InitStruct.Alternate = GPIO_AF9_FDCAN1;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
+    /* FDCAN1 interrupt Init */
+    HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+    HAL_NVIC_SetPriority(FDCAN1_IT1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(FDCAN1_IT1_IRQn);
+    HAL_NVIC_SetPriority(FDCAN_CAL_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(FDCAN_CAL_IRQn);
   /* USER CODE BEGIN FDCAN1_MspInit 1 */
 
   /* USER CODE END FDCAN1_MspInit 1 */
@@ -286,6 +418,10 @@ void HAL_FDCAN_MspDeInit(FDCAN_HandleTypeDef* hfdcan)
     */
     HAL_GPIO_DeInit(GPIOD, GPIO_PIN_0|GPIO_PIN_1);
 
+    /* FDCAN1 interrupt DeInit */
+    HAL_NVIC_DisableIRQ(FDCAN1_IT0_IRQn);
+    HAL_NVIC_DisableIRQ(FDCAN1_IT1_IRQn);
+    HAL_NVIC_DisableIRQ(FDCAN_CAL_IRQn);
   /* USER CODE BEGIN FDCAN1_MspDeInit 1 */
 
   /* USER CODE END FDCAN1_MspDeInit 1 */

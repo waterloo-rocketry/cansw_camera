@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2024 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2024 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -23,8 +23,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "canlib.h"
-#include "ov5640.h"
-#include <stdio.h>
+#include "util/can_tx_buffer.h"
+#include "platform.h"
+#include "health_check.h"
+#include "video.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,7 +36,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define STATUS_TIME_ms 500 // Main status loop
+#define FPS_TIME_ms 1000 // How often to report FPS
+#define SYNC_TIME_ms 10000 // How often to sync video to the SD card
+#define MAX_BUS_DEAD_TIME_ms 1000 // If we see no CAN messages (including our own), reset
+#define MAX_CAN_IDLE_TIME_ms 15*16*1000 // If we see no actuator commands, turn off
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,6 +49,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc2;
 
 DCMI_HandleTypeDef hdcmi;
 DMA_HandleTypeDef hdma_dcmi;
@@ -56,11 +64,11 @@ SD_HandleTypeDef hsd2;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
-FATFS fatfs;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_DCMI_Init(void);
@@ -68,17 +76,47 @@ static void MX_SDMMC2_SD_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_FDCAN1_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_ADC1_Init(void);
+static void MX_ADC2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t fb_a[131072];
-uint8_t fb_b[131072];
-const size_t BUF_SIZE = 0x7ff0;
+volatile bool seen_can_command = false;
+volatile bool recording_request = false;
+void can_callback_function(const can_msg_t *msg, uint32_t) {
+    if (get_board_unique_id(msg) == BOARD_UNIQUE_ID) {
+        return;
+    }
 
-void can_callback_function(const can_msg_t *message, uint32_t) {}
+    int dest_id = -1;
+    switch (get_message_type(msg)) {
+        case MSG_LEDS_ON:
+            LED_RED_ON();
+            LED_GREEN_ON();
+            break;
+        case MSG_LEDS_OFF:
+            LED_RED_OFF();
+            LED_GREEN_OFF();
+            break;
+        case MSG_RESET_CMD:
+            dest_id = get_reset_board_id(msg);
+            if(dest_id == BOARD_UNIQUE_ID || dest_id == 0 ) {
+                NVIC_SystemReset();
+            }
+            break;
+        case MSG_ACTUATOR_CMD:
+            if (get_actuator_id(msg) == ACTUATOR_CAMERA_1) {
+                seen_can_command = true;
+                recording_request = get_req_actuator_state(msg) == ACTUATOR_ON;
+            }
+            break;
+        default:
+            break;
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -104,6 +142,9 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
+/* Configure the peripherals common clocks */
+  PeriphCommonClock_Config();
+
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
@@ -117,95 +158,103 @@ int main(void)
   MX_FDCAN1_Init();
   MX_I2C1_Init();
   MX_FATFS_Init();
+  MX_ADC1_Init();
+  MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
 
-  can_init_stm(&hfdcan1, can_callback_function);
-
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET); // Set CAM_RESET low (active)
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET); // Set CAM_EN high
-  HAL_Delay(10);
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET); // Set CAM_RESET high
-  HAL_Delay(20);
-
-  FRESULT r = f_mount(&fatfs, "0:", 0);
-  if (r != FR_OK) {
-	  while (1);
-  }
-
-  // count the number of flies in the root directory of the SD card
-  uint16_t root_dir_files = 0;
-  DIR dir;
-  if (f_opendir(&dir, "/") != FR_OK) {
-	 while (1);
-  }
-
-  FILINFO finfo;
-  while (f_readdir(&dir, &finfo) == FR_OK && finfo.fname[0] != '\0') {
-	  root_dir_files++;
-  }
-  f_closedir(&dir);
-
-  HAL_StatusTypeDef res = ov5640_init();
-  if (res == HAL_OK) {
-	  FIL file;
-	  char path[20];
-	  sprintf(path, "/mov%04u.mjpg", root_dir_files);
-	  r = f_open(&file, path, FA_WRITE | FA_CREATE_ALWAYS);
-	  if (r != FR_OK) {
-		  while (1);
-	  }
-
-	  uint32_t length = 0;
-	  unsigned int retval;
-      can_msg_t board_stat_msg;
-
-	  for (uint8_t i = 0; i < 100; i++) {
-		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb_a, BUF_SIZE);
-		  r = f_write(&file, fb_b, length, &retval);
-		  if (r != FR_OK) {
-			  while (1);
-		  }
-		  while ((DCMI->CR & DCMI_CR_CAPTURE) != 0);
-		  HAL_DMA_Abort(hdcmi.DMA_Handle);
-		  length = (BUF_SIZE - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
-
-		  build_board_stat_msg(HAL_GetTick(), E_NOMINAL, NULL, 0, &board_stat_msg);
-		  can_send(&board_stat_msg);
-
-
-		  HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb_b, BUF_SIZE);
-		  r = f_write(&file, fb_a, length, &retval);
-		  if (r != FR_OK) {
-			  while (1);
-		  }
-		  while ((DCMI->CR & DCMI_CR_CAPTURE) != 0);
-		  HAL_DMA_Abort(hdcmi.DMA_Handle);
-		  length = (BUF_SIZE - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
-
-		  build_board_stat_msg(HAL_GetTick(), E_ILLEGAL_CAN_MSG, NULL, 0, &board_stat_msg);
-		  can_send(&board_stat_msg);
-	  }
-
-	  f_close(&file);
-  }
-
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); // Set CAM_EN low
-
+    can_init_stm(&hfdcan1, can_callback_function);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-	  can_msg_t board_stat_msg;
-	  build_board_stat_msg(0, E_SEGFAULT, NULL, 0, &board_stat_msg);
-	  can_send(&board_stat_msg);
-	  HAL_Delay(500);
+    uint32_t last_command_time = 0;
+    uint32_t last_status_time = 0;
+    uint32_t last_fps_time = 0;
+    uint32_t last_sync_time = 0;
+
+    uint8_t fps_counter = 0;
+    while (1) {
+        if (seen_can_command) {
+            seen_can_command = false;
+            last_command_time = millis();
+        }
+
+        if (millis() - last_command_time > MAX_CAN_IDLE_TIME_ms) {
+            recording_request = false;
+        }
+
+        if (millis() - last_status_time > STATUS_TIME_ms) {
+            last_status_time = millis();
+            LED_GREEN_TOGGLE();
+
+            bool status_ok = true;
+            status_ok = status_ok & !check_bus_current_error();
+            status_ok = status_ok & !check_bus_voltage_error();
+            HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
+            video_state_t video_state = video_get_state();
+            can_msg_t board_stat_msg;
+            if (video_state != VIDEO_OFF && video_state != VIDEO_ON) {
+                build_board_stat_msg(millis(), E_LOGGING, &video_state, 1, &board_stat_msg);
+                can_send(&board_stat_msg);
+            } else if (status_ok) {
+                build_board_stat_msg(millis(), E_NOMINAL, NULL, 0, &board_stat_msg);
+                can_send(&board_stat_msg);
+            } else {
+                //Error message already sent by check_bus_current_error
+            }
+
+            can_msg_t actuator_state_msg;
+            enum ACTUATOR_STATE cur_state = ACTUATOR_ILLEGAL;
+            if (video_state == VIDEO_OFF) cur_state = ACTUATOR_OFF;
+            if (video_state == VIDEO_ON)  cur_state = ACTUATOR_ON;
+            enum ACTUATOR_STATE req_state = recording_request ? ACTUATOR_ON : ACTUATOR_OFF;
+            build_actuator_stat_msg(millis(), ACTUATOR_CAMERA_1, cur_state, req_state, &actuator_state_msg);
+            HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
+            can_send(&actuator_state_msg);
+
+            // If something went wrong, turn off the camera and let another actuator command retry
+            if (video_state != VIDEO_OFF && video_state != VIDEO_ON) {
+                recording_request = false;
+            }
+        }
+
+        if (recording_request) {
+            LED_RED_ON();
+            if (video_get_state() == VIDEO_OFF) {
+                video_start();
+                last_sync_time = millis();
+            }
+
+            if (video_capture_frame()) {
+                fps_counter++;
+            }
+
+            if (millis() - last_sync_time > SYNC_TIME_ms) {
+                last_sync_time = millis();
+                video_f_sync();
+            }
+        } else {
+            LED_RED_OFF();
+            if (video_get_state() != VIDEO_OFF) {
+                video_stop();
+            }
+        }
+
+        if (millis() - last_fps_time > FPS_TIME_ms) {
+            last_fps_time = millis();
+
+            can_msg_t fps_msg;
+            build_analog_data_msg(millis(), SENSOR_VELOCITY, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
+            can_send(&fps_msg);
+
+            fps_counter = 0;
+        }
+
+        txb_heartbeat();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+    }
   /* USER CODE END 3 */
 }
 
@@ -286,6 +335,159 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief Peripherals Common Clock Configuration
+  * @retval None
+  */
+void PeriphCommonClock_Config(void)
+{
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  /** Initializes the peripherals clock
+  */
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInitStruct.PLL2.PLL2M = 32;
+  PeriphClkInitStruct.PLL2.PLL2N = 129;
+  PeriphClkInitStruct.PLL2.PLL2P = 2;
+  PeriphClkInitStruct.PLL2.PLL2Q = 2;
+  PeriphClkInitStruct.PLL2.PLL2R = 2;
+  PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_1;
+  PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
+  PeriphClkInitStruct.PLL2.PLL2FRACN = 0;
+  PeriphClkInitStruct.AdcClockSelection = RCC_ADCCLKSOURCE_PLL2;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_MultiModeTypeDef multimode = {0};
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Common config
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV64;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+  hadc1.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the ADC multi-mode
+  */
+  multimode.Mode = ADC_MODE_INDEPENDENT;
+  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_10;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  sConfig.OffsetSignedSaturation = DISABLE;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief ADC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC2_Init(void)
+{
+
+  /* USER CODE BEGIN ADC2_Init 0 */
+
+  /* USER CODE END ADC2_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC2_Init 1 */
+
+  /* USER CODE END ADC2_Init 1 */
+
+  /** Common config
+  */
+  hadc2.Instance = ADC2;
+  hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV64;
+  hadc2.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc2.Init.LowPowerAutoWait = DISABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.NbrOfConversion = 1;
+  hadc2.Init.DiscontinuousConvMode = DISABLE;
+  hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+  hadc2.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_11;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  sConfig.OffsetSignedSaturation = DISABLE;
+  if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC2_Init 2 */
+
+  /* USER CODE END ADC2_Init 2 */
+
+}
+
+/**
   * @brief DCMI Initialization Function
   * @param None
   * @retval None
@@ -340,7 +542,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 80;
@@ -515,19 +717,22 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_10, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : PB0 PB1 PB10 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10;
+  /*Configure GPIO pins : PB0 PB10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_10;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -544,6 +749,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA8 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PE1 */
   GPIO_InitStruct.Pin = GPIO_PIN_1;
@@ -567,11 +779,10 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+    /* User can add his own implementation to report the HAL error return state */
+    __disable_irq();
+    while (1) {
+    }
   /* USER CODE END Error_Handler_Debug */
 }
 
