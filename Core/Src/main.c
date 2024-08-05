@@ -194,7 +194,7 @@ int main(void)
             video_state_t video_state = video_get_state();
             can_msg_t board_stat_msg;
             if (video_state != VIDEO_OFF && video_state != VIDEO_ON) {
-                build_board_stat_msg(millis(), E_LOGGING, &video_state, 1, &board_stat_msg);
+                build_board_stat_msg(millis(), E_VIDEO, &video_state, 1, &board_stat_msg);
                 can_send(&board_stat_msg);
             } else if (status_ok) {
                 build_board_stat_msg(millis(), E_NOMINAL, NULL, 0, &board_stat_msg);
@@ -244,7 +244,7 @@ int main(void)
             last_fps_time = millis();
 
             can_msg_t fps_msg;
-            build_analog_data_msg(millis(), SENSOR_VELOCITY, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
+            build_analog_data_msg(millis(), SENSOR_FPS, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
             can_send(&fps_msg);
 
             fps_counter = 0;
