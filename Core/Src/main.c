@@ -45,7 +45,13 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#if BOARD_UNIQUE_ID == BOARD_ID_CAMERA_1
+#define ACTUATOR_ID ACTUATOR_CAMERA_1
+#elif BOARD_UNIQUE_ID == BOARD_ID_CAMERA_2
+#define ACTUATOR_ID ACTUATOR_CAMERA_2
+#else
+#error "Unknown board ID!"
+#endif
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -108,7 +114,7 @@ void can_callback_function(const can_msg_t *msg, uint32_t) {
             }
             break;
         case MSG_ACTUATOR_CMD:
-            if (get_actuator_id(msg) == ACTUATOR_CAMERA_1) {
+            if (get_actuator_id(msg) == ACTUATOR_ID) {
                 seen_can_command = true;
                 recording_request = get_req_actuator_state(msg) == ACTUATOR_ON;
             }
