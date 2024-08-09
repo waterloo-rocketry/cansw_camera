@@ -40,7 +40,7 @@
 #define FPS_TIME_ms 1000 // How often to report FPS
 #define SYNC_TIME_ms 10000 // How often to sync video to the SD card
 #define MAX_BUS_DEAD_TIME_ms 1000 // If we see no CAN messages (including our own), reset
-#define MAX_CAN_IDLE_TIME_ms 15*16*1000 // If we see no actuator commands, turn off
+#define MAX_CAN_IDLE_TIME_ms 15*60*1000 // If we see no actuator commands, turn off
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
