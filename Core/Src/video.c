@@ -42,13 +42,13 @@ void video_start() {
     root_dir_files++;
 
     HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET); // Set CAM_RESET low (active)
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET); // Set CAM_EN high
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_SET); // Set CAM_EN high
     HAL_Delay(10);
     HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET); // Set CAM_RESET high
     HAL_Delay(100);
 
     if (ov5640_init() != HAL_OK) {
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); // Set CAM_EN low
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET); // Set CAM_EN low
         state = VIDEO_ERR_CAM;
         return;
     }
@@ -57,7 +57,7 @@ void video_start() {
 }
 
 void video_stop() {
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); // Set CAM_EN low
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET); // Set CAM_EN low
     f_close(&video_file);
     state = VIDEO_OFF;
 }
