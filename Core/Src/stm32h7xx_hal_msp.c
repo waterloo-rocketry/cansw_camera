@@ -289,6 +289,7 @@ void HAL_DCMI_MspInit(DCMI_HandleTypeDef* hdcmi)
   /* USER CODE BEGIN DCMI_MspInit 1 */
 
   /* USER CODE END DCMI_MspInit 1 */
+
   }
 
 }
@@ -392,6 +393,7 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* hfdcan)
   /* USER CODE BEGIN FDCAN1_MspInit 1 */
 
   /* USER CODE END FDCAN1_MspInit 1 */
+
   }
 
 }
@@ -471,6 +473,7 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
   /* USER CODE BEGIN I2C1_MspInit 1 */
 
   /* USER CODE END I2C1_MspInit 1 */
+
   }
 
 }
@@ -564,6 +567,7 @@ void HAL_SD_MspInit(SD_HandleTypeDef* hsd)
   /* USER CODE BEGIN SDMMC2_MspInit 1 */
 
   /* USER CODE END SDMMC2_MspInit 1 */
+
   }
 
 }
@@ -657,6 +661,7 @@ void HAL_PCD_MspInit(PCD_HandleTypeDef* hpcd)
   /* USER CODE BEGIN USB_OTG_FS_MspInit 1 */
 
   /* USER CODE END USB_OTG_FS_MspInit 1 */
+
   }
 
 }
