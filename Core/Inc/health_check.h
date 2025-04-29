@@ -2,8 +2,8 @@
 #define HEALTH_CHECK_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
-bool check_bus_current_error(void);
-bool check_bus_voltage_error(void);
+uint32_t health_check(void);
 
 #endif

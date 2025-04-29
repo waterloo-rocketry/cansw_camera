@@ -45,9 +45,9 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#if BOARD_UNIQUE_ID == BOARD_ID_CAMERA_1
+#if BOARD_INST_UNIQUE_ID == BOARD_INST_ID_CAMERA_INJ_A
 #define ACTUATOR_ID ACTUATOR_CAMERA_INJ_A
-#elif BOARD_UNIQUE_ID == BOARD_ID_CAMERA_2
+#elif BOARD_INST_UNIQUE_ID == BOARD_INST_ID_CAMERA_INJ_B
 #define ACTUATOR_ID ACTUATOR_CAMERA_INJ_B
 #else
 #error "Unknown board ID!"
@@ -110,7 +110,7 @@ void can_callback_function(const can_msg_t *msg, uint32_t) {
         case MSG_ACTUATOR_CMD:
             if (get_actuator_id(msg) == ACTUATOR_ID) {
                 seen_can_command = true;
-                recording_request = get_req_actuator_state(msg) == ACT_STATE_ON;
+                recording_request = (get_cmd_actuator_state(msg) == ACT_STATE_ON);
             }
             break;
         default:
@@ -187,28 +187,23 @@ int main(void)
             last_status_time = millis();
             LED_GREEN_TOGGLE();
 
-            bool status_ok = true;
-            status_ok = status_ok & !check_bus_current_error();
-            status_ok = status_ok & !check_bus_voltage_error();
+			uint32_t general_error_bitfield = health_check();
             HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
             video_state_t video_state = video_get_state();
             can_msg_t board_stat_msg;
             if (video_state != VIDEO_OFF && video_state != VIDEO_ON) {
-                build_board_stat_msg(millis(), E_VIDEO, &video_state, 1, &board_stat_msg);
-                can_send(&board_stat_msg);
-            } else if (status_ok) {
-                build_board_stat_msg(millis(), E_NOMINAL, NULL, 0, &board_stat_msg);
-                can_send(&board_stat_msg);
+			    build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, 1, &board_stat_msg);
             } else {
-                //Error message already sent by check_bus_current_error
+                build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, video_state, &board_stat_msg);
             }
+			can_send(&board_stat_msg);
 
             can_msg_t actuator_state_msg;
             can_actuator_state_t cur_state = ACT_STATE_ILLEGAL;
             if (video_state == VIDEO_OFF) {cur_state = ACT_STATE_OFF;}
             if (video_state == VIDEO_ON) {cur_state = ACT_STATE_ON;}
             can_actuator_state_t req_state = recording_request ? ACT_STATE_ON : ACT_STATE_OFF;
-            build_actuator_stat_msg(millis(), ACTUATOR_ID, cur_state, req_state, &actuator_state_msg);
+            build_actuator_status_msg(PRIO_MEDIUM, millis(), ACTUATOR_ID, cur_state, req_state, &actuator_state_msg);
             HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
             can_send(&actuator_state_msg);
 
