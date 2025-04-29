@@ -46,9 +46,9 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 #if BOARD_UNIQUE_ID == BOARD_ID_CAMERA_1
-#define ACTUATOR_ID ACTUATOR_CAMERA_1
+#define ACTUATOR_ID ACTUATOR_CAMERA_INJ_A
 #elif BOARD_UNIQUE_ID == BOARD_ID_CAMERA_2
-#define ACTUATOR_ID ACTUATOR_CAMERA_2
+#define ACTUATOR_ID ACTUATOR_CAMERA_INJ_B
 #else
 #error "Unknown board ID!"
 #endif
@@ -93,11 +93,6 @@ static void MX_ADC2_Init(void);
 volatile bool seen_can_command = false;
 volatile bool recording_request = false;
 void can_callback_function(const can_msg_t *msg, uint32_t) {
-    if (get_board_unique_id(msg) == BOARD_UNIQUE_ID) {
-        return;
-    }
-
-    int dest_id = -1;
     switch (get_message_type(msg)) {
         case MSG_LEDS_ON:
             LED_RED_ON();
@@ -108,15 +103,14 @@ void can_callback_function(const can_msg_t *msg, uint32_t) {
             LED_GREEN_OFF();
             break;
         case MSG_RESET_CMD:
-            dest_id = get_reset_board_id(msg);
-            if(dest_id == BOARD_UNIQUE_ID || dest_id == 0 ) {
+		    if(check_board_need_reset(msg)){
                 NVIC_SystemReset();
-            }
+		    }
             break;
         case MSG_ACTUATOR_CMD:
             if (get_actuator_id(msg) == ACTUATOR_ID) {
                 seen_can_command = true;
-                recording_request = get_req_actuator_state(msg) == ACTUATOR_ON;
+                recording_request = get_req_actuator_state(msg) == ACT_STATE_ON;
             }
             break;
         default:
@@ -210,11 +204,11 @@ int main(void)
             }
 
             can_msg_t actuator_state_msg;
-            enum ACTUATOR_STATE cur_state = ACTUATOR_ILLEGAL;
-            if (video_state == VIDEO_OFF) cur_state = ACTUATOR_OFF;
-            if (video_state == VIDEO_ON)  cur_state = ACTUATOR_ON;
-            enum ACTUATOR_STATE req_state = recording_request ? ACTUATOR_ON : ACTUATOR_OFF;
-            build_actuator_stat_msg(millis(), ACTUATOR_CAMERA_1, cur_state, req_state, &actuator_state_msg);
+            can_actuator_state_t cur_state = ACT_STATE_ILLEGAL;
+            if (video_state == VIDEO_OFF) {cur_state = ACT_STATE_OFF;}
+            if (video_state == VIDEO_ON) {cur_state = ACT_STATE_ON;}
+            can_actuator_state_t req_state = recording_request ? ACT_STATE_ON : ACT_STATE_OFF;
+            build_actuator_stat_msg(millis(), ACTUATOR_ID, cur_state, req_state, &actuator_state_msg);
             HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
             can_send(&actuator_state_msg);
 
@@ -250,7 +244,7 @@ int main(void)
             last_fps_time = millis();
 
             can_msg_t fps_msg;
-            build_analog_data_msg(millis(), SENSOR_FPS, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
+            build_analog_data_msg(PRIO_MEDIUM, millis(), SENSOR_FPS, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
             can_send(&fps_msg);
 
             fps_counter = 0;
