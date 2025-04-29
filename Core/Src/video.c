@@ -1,7 +1,8 @@
-#include "video.h"
 #include <stdio.h>
+
 #include "fatfs.h"
 #include "ov5640.h"
+#include "video.h"
 
 const uint32_t MAX_FILE_SIZE = 1 << 31;
 
@@ -85,7 +86,7 @@ bool video_capture_frame() {
         capture_buf = 0;
     }
 
-    HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t) fb[capture_buf], BUF_SIZE);
+    HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb[capture_buf], BUF_SIZE);
     // Write out write_buf while DMA is happening in the background
     UINT retval;
     FRESULT r = f_write(&video_file, fb[write_buf], length, &retval);
@@ -93,17 +94,16 @@ bool video_capture_frame() {
         state = VIDEO_ERR_SD;
     }
     // Then wait for DMA to finish
-    while ((DCMI->CR & DCMI_CR_CAPTURE) != 0);
+    while ((DCMI->CR & DCMI_CR_CAPTURE) != 0)
+        ;
     // We have to manually abort the DMA and calculate the length when the camera is done,
     // since it doesn't stop automatically
     HAL_DMA_Abort(hdcmi.DMA_Handle);
-    length = (BUF_SIZE - ((DMA_Stream_TypeDef*) hdcmi.DMA_Handle->Instance)->NDTR) * 4;
+    length = (BUF_SIZE - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
     write_buf = capture_buf;
 
     // Do a quick integrity check on the captured frame
-    if (fb[capture_buf][6] != 'J' ||
-        fb[capture_buf][7] != 'F' ||
-        fb[capture_buf][8] != 'I' ||
+    if (fb[capture_buf][6] != 'J' || fb[capture_buf][7] != 'F' || fb[capture_buf][8] != 'I' ||
         fb[capture_buf][9] != 'F') {
         return false;
     }
