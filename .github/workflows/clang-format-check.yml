@@ -16,4 +16,4 @@ jobs:
         uses: waterloo-rocketry/actions/clang-format-check@main
         with:
           clang-format-config-path: 'rocketlib/.clang-format'
-          c-source-files: 'Core/Src/health_check.c Core/Src/ov5640.c Core/Src/platform.c Core/Src/video.c Core/Inc/health_check.c Core/Inc/ov5640.h Core/Inc/platform.h Core/Inc/video.h'
+          c-source-files: 'Core/Src/health_check.c Core/Src/ov5640.c Core/Src/platform.c Core/Src/video.c Core/Inc/health_check.h Core/Inc/ov5640.h Core/Inc/platform.h Core/Inc/video.h'

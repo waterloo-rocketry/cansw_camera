@@ -1,7 +1,7 @@
 #include <stdbool.h>
 
-#include "ov5640.h"
 #include "main.h"
+#include "ov5640.h"
 
 HAL_StatusTypeDef ov5640_read_reg(uint16_t addr, uint8_t *val) {
     return HAL_I2C_Mem_Read(&hi2c1, OV5640_I2C_ADDR, addr, 2, val, 1, 100);

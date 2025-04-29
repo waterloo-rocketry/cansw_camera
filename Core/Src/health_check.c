@@ -6,7 +6,8 @@
 extern ADC_HandleTypeDef hadc1;
 extern ADC_HandleTypeDef hadc2;
 
-#define BATT_CURR_SCALAR_TIMES 2 // ADC / 4096 * 2.8V / 100V/V / 0.03 Ohm * 1000mA/A = ADC * 0.227 = ADC * 2 / 9
+// ADC / 4096 * 2.8V / 100V/V / 0.03 Ohm * 1000mA/A = ADC * 0.227 = ADC * 2 / 9
+#define BATT_CURR_SCALAR_TIMES 2
 #define BATT_CURR_SCALAR_DIV 9
 #define BATTERY_CURRENT_THRESHOLD 400 // Should be even less when running without OV5640
 
