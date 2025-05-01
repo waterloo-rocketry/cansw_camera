@@ -45,13 +45,8 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#if BOARD_INST_UNIQUE_ID == BOARD_INST_ID_CAMERA_INJ_A
-#define ACTUATOR_ID ACTUATOR_CAMERA_INJ_A
-#elif BOARD_INST_UNIQUE_ID == BOARD_INST_ID_CAMERA_INJ_B
-#define ACTUATOR_ID ACTUATOR_CAMERA_INJ_B
-#else
-#error "Unknown board ID!"
-#endif
+const can_actuator_id_t ACTUATOR_ID =
+    BOARD_INST_UNIQUE_ID - BOARD_INST_ID_CAMERA_INJ_A + ACTUATOR_CAMERA_INJ_A;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
