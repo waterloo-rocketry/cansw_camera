@@ -194,7 +194,7 @@ int main(void)
             if (video_state != VIDEO_OFF && video_state != VIDEO_ON) {
 			    build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, 1, &board_stat_msg);
             } else {
-                build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, video_state, &board_stat_msg);
+                build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, 0, &board_stat_msg);
             }
 			can_send(&board_stat_msg);
 
