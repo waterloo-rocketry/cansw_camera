@@ -45,13 +45,8 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#if BOARD_UNIQUE_ID == BOARD_ID_CAMERA_1
-#define ACTUATOR_ID ACTUATOR_CAMERA_1
-#elif BOARD_UNIQUE_ID == BOARD_ID_CAMERA_2
-#define ACTUATOR_ID ACTUATOR_CAMERA_2
-#else
-#error "Unknown board ID!"
-#endif
+const can_actuator_id_t ACTUATOR_ID =
+    BOARD_INST_UNIQUE_ID - BOARD_INST_ID_CAMERA_INJ_A + ACTUATOR_CAMERA_INJ_A;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -93,11 +88,6 @@ static void MX_ADC2_Init(void);
 volatile bool seen_can_command = false;
 volatile bool recording_request = false;
 void can_callback_function(const can_msg_t *msg, uint32_t) {
-    if (get_board_unique_id(msg) == BOARD_UNIQUE_ID) {
-        return;
-    }
-
-    int dest_id = -1;
     switch (get_message_type(msg)) {
         case MSG_LEDS_ON:
             LED_RED_ON();
@@ -108,15 +98,14 @@ void can_callback_function(const can_msg_t *msg, uint32_t) {
             LED_GREEN_OFF();
             break;
         case MSG_RESET_CMD:
-            dest_id = get_reset_board_id(msg);
-            if(dest_id == BOARD_UNIQUE_ID || dest_id == 0 ) {
+		    if(check_board_need_reset(msg)){
                 NVIC_SystemReset();
-            }
+		    }
             break;
         case MSG_ACTUATOR_CMD:
             if (get_actuator_id(msg) == ACTUATOR_ID) {
                 seen_can_command = true;
-                recording_request = get_req_actuator_state(msg) == ACTUATOR_ON;
+                recording_request = (get_cmd_actuator_state(msg) == ACT_STATE_ON);
             }
             break;
         default:
@@ -148,7 +137,7 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
-/* Configure the peripherals common clocks */
+  /* Configure the peripherals common clocks */
   PeriphCommonClock_Config();
 
   /* USER CODE BEGIN SysInit */
@@ -193,28 +182,23 @@ int main(void)
             last_status_time = millis();
             LED_GREEN_TOGGLE();
 
-            bool status_ok = true;
-            status_ok = status_ok & !check_bus_current_error();
-            status_ok = status_ok & !check_bus_voltage_error();
+			uint32_t general_error_bitfield = health_check();
             HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
             video_state_t video_state = video_get_state();
             can_msg_t board_stat_msg;
             if (video_state != VIDEO_OFF && video_state != VIDEO_ON) {
-                build_board_stat_msg(millis(), E_VIDEO, &video_state, 1, &board_stat_msg);
-                can_send(&board_stat_msg);
-            } else if (status_ok) {
-                build_board_stat_msg(millis(), E_NOMINAL, NULL, 0, &board_stat_msg);
-                can_send(&board_stat_msg);
+			    build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, 1, &board_stat_msg);
             } else {
-                //Error message already sent by check_bus_current_error
+                build_general_board_status_msg(PRIO_HIGH, millis(), general_error_bitfield, 0, &board_stat_msg);
             }
+			can_send(&board_stat_msg);
 
             can_msg_t actuator_state_msg;
-            enum ACTUATOR_STATE cur_state = ACTUATOR_ILLEGAL;
-            if (video_state == VIDEO_OFF) cur_state = ACTUATOR_OFF;
-            if (video_state == VIDEO_ON)  cur_state = ACTUATOR_ON;
-            enum ACTUATOR_STATE req_state = recording_request ? ACTUATOR_ON : ACTUATOR_OFF;
-            build_actuator_stat_msg(millis(), ACTUATOR_CAMERA_1, cur_state, req_state, &actuator_state_msg);
+            can_actuator_state_t cur_state = ACT_STATE_ILLEGAL;
+            if (video_state == VIDEO_OFF) {cur_state = ACT_STATE_OFF;}
+            if (video_state == VIDEO_ON) {cur_state = ACT_STATE_ON;}
+            can_actuator_state_t req_state = recording_request ? ACT_STATE_ON : ACT_STATE_OFF;
+            build_actuator_status_msg(PRIO_MEDIUM, millis(), ACTUATOR_ID, cur_state, req_state, &actuator_state_msg);
             HAL_Delay(1); // Allow time for the TX fifo to empty??? Hacky fix
             can_send(&actuator_state_msg);
 
@@ -250,7 +234,7 @@ int main(void)
             last_fps_time = millis();
 
             can_msg_t fps_msg;
-            build_analog_data_msg(millis(), SENSOR_FPS, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
+            build_analog_data_msg(PRIO_MEDIUM, millis(), SENSOR_FPS, fps_counter / (FPS_TIME_ms / 1000), &fps_msg);
             can_send(&fps_msg);
 
             fps_counter = 0;
@@ -280,7 +264,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
@@ -294,9 +278,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 50;
+  RCC_OscInitStruct.PLL.PLLN = 12;
   RCC_OscInitStruct.PLL.PLLP = 2;
-  RCC_OscInitStruct.PLL.PLLQ = 8;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -313,11 +297,11 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV4;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
-  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV1;
+  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
@@ -351,13 +335,13 @@ void PeriphCommonClock_Config(void)
   /** Initializes the peripherals clock
   */
   PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInitStruct.PLL2.PLL2M = 32;
-  PeriphClkInitStruct.PLL2.PLL2N = 129;
+  PeriphClkInitStruct.PLL2.PLL2M = 4;
+  PeriphClkInitStruct.PLL2.PLL2N = 10;
   PeriphClkInitStruct.PLL2.PLL2P = 2;
   PeriphClkInitStruct.PLL2.PLL2Q = 2;
   PeriphClkInitStruct.PLL2.PLL2R = 2;
-  PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_1;
-  PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
+  PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3;
+  PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOMEDIUM;
   PeriphClkInitStruct.PLL2.PLL2FRACN = 0;
   PeriphClkInitStruct.AdcClockSelection = RCC_ADCCLKSOURCE_PLL2;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
@@ -402,6 +386,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
   hadc1.Init.OversamplingMode = DISABLE;
+  hadc1.Init.Oversampling.Ratio = 1;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
@@ -469,6 +454,7 @@ static void MX_ADC2_Init(void)
   hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
   hadc2.Init.OversamplingMode = DISABLE;
+  hadc2.Init.Oversampling.Ratio = 1;
   if (HAL_ADC_Init(&hadc2) != HAL_OK)
   {
     Error_Handler();
@@ -551,10 +537,10 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 80;
+  hfdcan1.Init.NominalPrescaler = 64;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
-  hfdcan1.Init.NominalTimeSeg1 = 2;
-  hfdcan1.Init.NominalTimeSeg2 = 2;
+  hfdcan1.Init.NominalTimeSeg1 = 1;
+  hfdcan1.Init.NominalTimeSeg2 = 1;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
@@ -599,7 +585,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00C0EAFF;
+  hi2c1.Init.Timing = 0x20303E5D;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
