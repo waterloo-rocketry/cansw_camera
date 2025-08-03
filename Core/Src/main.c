@@ -45,8 +45,7 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-const can_actuator_id_t ACTUATOR_ID =
-    BOARD_INST_UNIQUE_ID - BOARD_INST_ID_CAMERA_INJ_A + ACTUATOR_CAMERA_INJ_A;
+can_actuator_id_t ACTUATOR_ID = ACTUATOR_CAMERA_CANARD_A;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -162,6 +161,23 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+	// Re-assign ACTUATOR_ID based on Board Instance ID
+	switch(BOARD_INST_UNIQUE_ID) {
+	case BOARD_INST_ID_CAMERA_CANARD_A:
+		ACTUATOR_ID = ACTUATOR_CAMERA_CANARD_A;
+		break;
+	case BOARD_INST_ID_CAMERA_CANARD_B:
+		ACTUATOR_ID = ACTUATOR_CAMERA_CANARD_B;
+		break;
+	case BOARD_INST_ID_CAMERA_RECOVERY:
+		ACTUATOR_ID = ACTUATOR_CAMERA_RECOVERY;
+		break;
+	case BOARD_INST_ID_PAYLOAD:
+		ACTUATOR_ID = ACTUATOR_CAMERA_PAYLOAD;
+		break;
+	}
+
     uint32_t last_command_time = 0;
     uint32_t last_status_time = 0;
     uint32_t last_fps_time = 0;
