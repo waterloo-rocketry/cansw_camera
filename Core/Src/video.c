@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "lfs.h"
+#include "main.h"
 #include "ov5640.h"
 #include "video.h"
 
@@ -14,22 +15,44 @@ uint32_t root_dir_files;
 
 video_state_t state;
 
+int sd_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, void *buffer,
+			lfs_size_t size) {
+	uint32_t timeout_ms = 2000U;
+	uint32_t block_addr = block;
+	uint32_t num_blocks = (size + c->block_size - 1) / c->block_size;
+	HAL_StatusTypeDef hal =
+		HAL_SD_ReadBlocks(&hsd2, (uint8_t *)buffer, block_addr, num_blocks, timeout_ms);
+	if (hal != HAL_OK) {
+		return -1; // LFS_ERR_IO
+	}
+
+	// Wait for card to be ready (polling)
+	uint32_t start = HAL_GetTick();
+	while (HAL_SD_GetCardState(&hsd2) != HAL_SD_CARD_TRANSFER) {
+		if ((HAL_GetTick() - start) > timeout_ms) {
+			return -1; // timeout -> LFS_ERR_IO
+		}
+	}
+
+	return 0; // success
+}
+
 // configuration of the filesystem is provided by this struct
 const struct lfs_config cfg = {
-    // block device operations
-    .read  = user_provided_block_device_read,
-    .prog  = user_provided_block_device_prog,
-    .erase = user_provided_block_device_erase,
-    .sync  = user_provided_block_device_sync,
+	// block device operations
+	.read = sd_read,
+	.prog = user_provided_block_device_prog,
+	.erase = user_provided_block_device_erase,
+	.sync = user_provided_block_device_sync,
 
-    // block device configuration
-    .read_size = 16,
-    .prog_size = 16,
-    .block_size = 4096,
-    .block_count = 128,
-    .cache_size = 16,
-    .lookahead_size = 16,
-    .block_cycles = 500,
+	// block device configuration
+	.read_size = 16,
+	.prog_size = 16,
+	.block_size = 4096,
+	.block_count = 128,
+	.cache_size = 16,
+	.lookahead_size = 16,
+	.block_cycles = 500,
 };
 
 void video_start() {
