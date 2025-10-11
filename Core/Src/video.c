@@ -1,19 +1,39 @@
 #include <stdio.h>
 
-#include "fatfs.h"
+#include "lfs.h"
 #include "ov5640.h"
 #include "video.h"
 
 const uint32_t MAX_FILE_SIZE = 1 << 31;
 
-FATFS fatfs;
-FIL video_file;
+// variables used by the filesystem
+lfs_t lfs;
+lfs_file_t video_file;
+
 uint32_t root_dir_files;
 
 video_state_t state;
 
+// configuration of the filesystem is provided by this struct
+const struct lfs_config cfg = {
+    // block device operations
+    .read  = user_provided_block_device_read,
+    .prog  = user_provided_block_device_prog,
+    .erase = user_provided_block_device_erase,
+    .sync  = user_provided_block_device_sync,
+
+    // block device configuration
+    .read_size = 16,
+    .prog_size = 16,
+    .block_size = 4096,
+    .block_count = 128,
+    .cache_size = 16,
+    .lookahead_size = 16,
+    .block_cycles = 500,
+};
+
 void video_start() {
-	FRESULT r = f_mount(&fatfs, "0:", 0);
+	FRESULT r = lfs_mount(&lfs, "0:", 0);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
@@ -22,20 +42,20 @@ void video_start() {
 	// count the number of flies in the root directory of the SD card
 	root_dir_files = 0;
 	DIR dir;
-	if (f_opendir(&dir, "/") != FR_OK) {
+	if (lfs_dir_open(&dir, "/") != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
 	}
 
 	FILINFO finfo;
-	while (f_readdir(&dir, &finfo) == FR_OK && finfo.fname[0] != '\0') {
+	while (lfs_dir_read(&dir, &finfo) == FR_OK && finfo.fname[0] != '\0') {
 		root_dir_files++;
 	}
-	f_closedir(&dir);
+	lfs_dir_close(&dir);
 
 	char path[20];
 	sprintf(path, "/mov%04u.mjpg", root_dir_files);
-	r = f_open(&video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
+	r = lfs_file_open(&video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
@@ -59,7 +79,7 @@ void video_start() {
 
 void video_stop() {
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET); // Set CAM_EN low
-	f_close(&video_file);
+	lfs_file_close(&video_file);
 	state = VIDEO_OFF;
 }
 
@@ -90,7 +110,7 @@ bool video_capture_frame() {
 	HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb[capture_buf], BUF_SIZE);
 	// Write out write_buf while DMA is happening in the background
 	UINT retval;
-	FRESULT r = f_write(&video_file, fb[write_buf], length, &retval);
+	FRESULT r = lfs_file_write(&video_file, fb[write_buf], length, &retval);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 	}
@@ -111,21 +131,21 @@ bool video_capture_frame() {
 	return true;
 }
 
-void video_f_sync() {
+void video_file_sync() {
 	// Write file metadata periodically to prevent loss of data on poweroff
-	FRESULT r = f_sync(&video_file);
+	FRESULT r = lfs_file_sync(&video_file);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
 	}
 
 	// And switch to a new file to avoid FATFS 4Gb size limit
-	if (f_size(&video_file) >= MAX_FILE_SIZE) {
-		f_close(&video_file);
+	if (lfs_file_size(&video_file) >= MAX_FILE_SIZE) {
+		lfs_file_close(&video_file);
 
 		char path[20];
 		sprintf(path, "/mov%04u.mjpg", root_dir_files);
-		r = f_open(&video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
+		r = lfs_file_open(&video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
 		if (r != FR_OK) {
 			state = VIDEO_ERR_SD;
 			return;
