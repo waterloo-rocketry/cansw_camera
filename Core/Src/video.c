@@ -37,6 +37,36 @@ int sd_read(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, void *
 	return 0; // success
 }
 
+int sd_write(const struct lfs_config *c, lfs_block_t block, lfs_off_t off, const void *buffer,
+			 lfs_size_t size) {
+	uint32_t timeout_ms = 2000U;
+	uint32_t block_addr = block;
+	uint32_t num_blocks = (size + c->block_size - 1) / c->block_size;
+	HAL_StatusTypeDef hal =
+		HAL_SD_WriteBlocks(&hsd2, (uint8_t *)buffer, block_addr, num_blocks, timeout_ms);
+	if (hal != HAL_OK) {
+		return -1; // LFS_ERR_IO
+	}
+
+	// Wait for card to be ready (polling)
+	uint32_t start = HAL_GetTick();
+	while (HAL_SD_GetCardState(&hsd2) != HAL_SD_CARD_TRANSFER) {
+		if ((HAL_GetTick() - start) > timeout_ms) {
+			return -1; // timeout -> LFS_ERR_IO
+		}
+	}
+
+	return 0; // success
+}
+
+int sd_erase(const struct lfs_config *c, lfs_block_t block) {
+	return 0; // SD does not require explicit erase
+}
+
+int sd_sync(const struct lfs_config *c) {
+	return 0;
+}
+
 // configuration of the filesystem is provided by this struct
 const struct lfs_config cfg = {
 	// block device operations
