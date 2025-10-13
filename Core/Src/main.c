@@ -22,6 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stddef.h>
+#include <string.h>
 #include "canlib.h"
 #include "util/can_tx_buffer.h"
 #include "platform.h"
@@ -86,6 +88,29 @@ static void MX_ADC2_Init(void);
 /* USER CODE BEGIN 0 */
 volatile bool seen_can_command = false;
 volatile bool recording_request = false;
+volatile bool snapshot_request = false;
+volatile bool snapshot_busy_response_pending = false;
+volatile uint8_t snapshot_request_id = 0;
+volatile uint8_t snapshot_busy_request_id = 0;
+static volatile bool snapshot_in_progress = false;
+static uint8_t snapshot_frame_id = 0;
+static uint8_t snapshot_active_request_id = 0;
+static uint32_t snapshot_total_size = 0;
+static uint32_t snapshot_bytes_sent = 0;
+static uint16_t snapshot_chunk_index = 0;
+static uint8_t snapshot_buffer[VIDEO_FRAME_MAX_BYTES];
+
+static void snapshot_send_status(
+    uint8_t frame_id, uint8_t request_id, camera_snapshot_status_t status, uint32_t total_size
+) {
+    can_msg_t status_msg;
+    if (build_camera_snapshot_status_msg(
+            PRIO_HIGH, (uint16_t)millis(), frame_id, request_id, status, total_size, &status_msg
+        )) {
+        can_send(&status_msg);
+    }
+}
+
 void can_callback_function(const can_msg_t *msg, uint32_t) {
     switch (get_message_type(msg)) {
         case MSG_LEDS_ON:
@@ -107,6 +132,20 @@ void can_callback_function(const can_msg_t *msg, uint32_t) {
                 recording_request = (get_cmd_actuator_state(msg) == ACT_STATE_ON);
             }
             break;
+        case MSG_CAMERA_SNAPSHOT_CMD: {
+            uint8_t request_id = 0;
+            if (!parse_camera_snapshot_cmd(msg, &request_id)) {
+                break;
+            }
+            if (snapshot_in_progress || snapshot_request) {
+                snapshot_busy_request_id = request_id;
+                snapshot_busy_response_pending = true;
+            } else {
+                snapshot_request_id = request_id;
+                snapshot_request = true;
+            }
+            break;
+        }
         default:
             break;
     }
@@ -194,6 +233,72 @@ int main(void)
             recording_request = false;
         }
 
+        if (snapshot_busy_response_pending) {
+            snapshot_busy_response_pending = false;
+            snapshot_send_status(
+                snapshot_frame_id, snapshot_busy_request_id, CAMERA_SNAPSHOT_STATUS_BUSY, 0
+            );
+        }
+
+        if (snapshot_request) {
+            uint8_t request_id = snapshot_request_id;
+            snapshot_request = false;
+
+            if (snapshot_in_progress) {
+                snapshot_send_status(
+                    snapshot_frame_id, request_id, CAMERA_SNAPSHOT_STATUS_BUSY, snapshot_total_size
+                );
+            } else {
+                camera_snapshot_status_t status = CAMERA_SNAPSHOT_STATUS_OK;
+                const uint8_t *frame_ptr = NULL;
+                size_t frame_len = 0;
+
+                if (video_get_state() != VIDEO_ON) {
+                    status = CAMERA_SNAPSHOT_STATUS_CAMERA_OFF;
+                } else {
+                    if (!video_get_last_frame(&frame_ptr, &frame_len)) {
+                        if (video_capture_frame()) {
+                            if (!video_get_last_frame(&frame_ptr, &frame_len)) {
+                                status = CAMERA_SNAPSHOT_STATUS_NO_FRAME;
+                            }
+                        } else {
+                            status = CAMERA_SNAPSHOT_STATUS_CAPTURE_FAILED;
+                        }
+                    }
+                }
+
+                if (status == CAMERA_SNAPSHOT_STATUS_OK && (frame_ptr == NULL || frame_len == 0)) {
+                    status = CAMERA_SNAPSHOT_STATUS_NO_FRAME;
+                }
+
+                if (status == CAMERA_SNAPSHOT_STATUS_OK) {
+                    if (frame_len > VIDEO_FRAME_MAX_BYTES) {
+                        frame_len = VIDEO_FRAME_MAX_BYTES;
+                    }
+                    memcpy(snapshot_buffer, frame_ptr, frame_len);
+                    snapshot_total_size = (uint32_t)frame_len;
+                    snapshot_bytes_sent = 0;
+                    snapshot_chunk_index = 0;
+                    snapshot_frame_id++;
+                    snapshot_active_request_id = request_id;
+                    snapshot_in_progress = (snapshot_total_size > 0);
+                    if (!snapshot_in_progress) {
+                        snapshot_active_request_id = 0;
+                    }
+                    snapshot_send_status(
+                        snapshot_frame_id, request_id, CAMERA_SNAPSHOT_STATUS_OK, snapshot_total_size
+                    );
+                } else {
+                    snapshot_total_size = 0;
+                    snapshot_bytes_sent = 0;
+                    snapshot_chunk_index = 0;
+                    snapshot_in_progress = false;
+                    snapshot_active_request_id = 0;
+                    snapshot_send_status(snapshot_frame_id, request_id, status, 0);
+                }
+            }
+        }
+
         if (millis() - last_status_time > STATUS_TIME_ms) {
             last_status_time = millis();
             LED_GREEN_TOGGLE();
@@ -254,6 +359,53 @@ int main(void)
             can_send(&fps_msg);
 
             fps_counter = 0;
+        }
+
+        if (snapshot_in_progress) {
+            while (snapshot_in_progress && snapshot_bytes_sent < snapshot_total_size &&
+                   can_send_rdy()) {
+                uint32_t remaining = snapshot_total_size - snapshot_bytes_sent;
+                uint8_t chunk_len =
+                    (remaining > CAMERA_SNAPSHOT_CHUNK_BYTES)
+                        ? CAMERA_SNAPSHOT_CHUNK_BYTES
+                        : (uint8_t)remaining;
+                if (chunk_len == 0) {
+                    break;
+                }
+                if (snapshot_chunk_index >= 0x8000) {
+                    snapshot_send_status(
+                        snapshot_frame_id, snapshot_active_request_id,
+                        CAMERA_SNAPSHOT_STATUS_CAPTURE_FAILED, snapshot_total_size
+                    );
+                    snapshot_in_progress = false;
+                    snapshot_total_size = 0;
+                    snapshot_bytes_sent = 0;
+                    snapshot_chunk_index = 0;
+                    snapshot_active_request_id = 0;
+                    break;
+                }
+                bool is_last = (snapshot_bytes_sent + chunk_len) >= snapshot_total_size;
+                can_msg_t chunk_msg;
+                if (!build_camera_snapshot_chunk_msg(
+                        PRIO_MEDIUM, snapshot_frame_id, snapshot_chunk_index, is_last,
+                        snapshot_buffer + snapshot_bytes_sent, chunk_len, &chunk_msg
+                    )) {
+                    break;
+                }
+                if (!can_send(&chunk_msg)) {
+                    break;
+                }
+                snapshot_bytes_sent += chunk_len;
+                snapshot_chunk_index++;
+            }
+
+            if (snapshot_in_progress && snapshot_bytes_sent >= snapshot_total_size) {
+                snapshot_in_progress = false;
+                snapshot_total_size = 0;
+                snapshot_bytes_sent = 0;
+                snapshot_chunk_index = 0;
+                snapshot_active_request_id = 0;
+            }
         }
 
         txb_heartbeat();

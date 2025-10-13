@@ -12,6 +12,11 @@ uint32_t root_dir_files;
 
 video_state_t state;
 
+#define NUM_BUF 2U
+static uint8_t fb[NUM_BUF][VIDEO_FRAME_MAX_BYTES];
+static size_t current_frame_length = 0;
+static uint8_t current_write_buf = 0;
+
 void video_start() {
     FRESULT r = f_mount(&fatfs, "0:", 0);
     if (r != FR_OK) {
@@ -54,6 +59,8 @@ void video_start() {
         return;
     }
 
+    current_frame_length = 0;
+    current_write_buf = 0;
     state = VIDEO_ON;
 }
 
@@ -67,30 +74,27 @@ video_state_t video_get_state() {
     return state;
 }
 
-#define BUF_SIZE 0x7ff0
-#define NUM_BUF 2
 bool video_capture_frame() {
-    static uint8_t fb[NUM_BUF][(BUF_SIZE + 0xf) * 4];
-
-    static size_t length = 0;
-    static uint8_t write_buf = 0;
-
     if (state != VIDEO_ON) {
         return false;
     }
 
     // Double buffered capture. On each call to capture_frame, capture into capture_buf
     // while writing out write_buf, then swap.
-    uint8_t capture_buf = write_buf + 1;
+    uint8_t prev_buf = current_write_buf;
+    uint8_t capture_buf = prev_buf + 1;
     if (capture_buf >= NUM_BUF) {
         capture_buf = 0;
     }
 
-    HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb[capture_buf], BUF_SIZE);
+    HAL_DCMI_Start_DMA(
+        &hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb[capture_buf], VIDEO_CAPTURE_DMA_WORDS
+    );
     // Write out write_buf while DMA is happening in the background
     UINT retval;
-    FRESULT r = f_write(&video_file, fb[write_buf], length, &retval);
-    if (r != FR_OK) {
+    size_t prev_length = current_frame_length;
+    FRESULT r = f_write(&video_file, fb[prev_buf], prev_length, &retval);
+    if (r != FR_OK || retval != prev_length) {
         state = VIDEO_ERR_SD;
     }
     // Then wait for DMA to finish
@@ -99,12 +103,16 @@ bool video_capture_frame() {
     // We have to manually abort the DMA and calculate the length when the camera is done,
     // since it doesn't stop automatically
     HAL_DMA_Abort(hdcmi.DMA_Handle);
-    length = (BUF_SIZE - ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) * 4;
-    write_buf = capture_buf;
+    size_t captured_length =
+        (VIDEO_CAPTURE_DMA_WORDS -
+         ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) *
+        4U;
+    current_write_buf = capture_buf;
+    current_frame_length = captured_length;
 
     // Do a quick integrity check on the captured frame
-    if (fb[capture_buf][6] != 'J' || fb[capture_buf][7] != 'F' || fb[capture_buf][8] != 'I' ||
-        fb[capture_buf][9] != 'F') {
+    if (captured_length == 0 || fb[capture_buf][6] != 'J' || fb[capture_buf][7] != 'F' ||
+        fb[capture_buf][8] != 'I' || fb[capture_buf][9] != 'F') {
         return false;
     }
     return true;
@@ -131,4 +139,18 @@ void video_f_sync() {
         }
         root_dir_files++;
     }
+}
+
+bool video_get_last_frame(const uint8_t **data, size_t *length) {
+    if (!data || !length) {
+        return false;
+    }
+
+    if (current_frame_length == 0) {
+        return false;
+    }
+
+    *data = fb[current_write_buf];
+    *length = current_frame_length;
+    return true;
 }
