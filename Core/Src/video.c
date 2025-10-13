@@ -103,10 +103,8 @@ bool video_capture_frame() {
     // We have to manually abort the DMA and calculate the length when the camera is done,
     // since it doesn't stop automatically
     HAL_DMA_Abort(hdcmi.DMA_Handle);
-    size_t captured_length =
-        (VIDEO_CAPTURE_DMA_WORDS -
-         ((DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance)->NDTR) *
-        4U;
+    DMA_Stream_TypeDef *dma_stream = (DMA_Stream_TypeDef *)hdcmi.DMA_Handle->Instance;
+    size_t captured_length = (VIDEO_CAPTURE_DMA_WORDS - dma_stream->NDTR) * 4U;
     current_write_buf = capture_buf;
     current_frame_length = captured_length;
 
