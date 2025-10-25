@@ -86,7 +86,7 @@ const struct lfs_config cfg = {
 };
 
 void video_start() {
-	FRESULT r = lfs_mount(&lfs, "0:", 0);
+	FRESULT r = lfs_mount(&lfs, &cfg);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
@@ -95,20 +95,20 @@ void video_start() {
 	// count the number of flies in the root directory of the SD card
 	root_dir_files = 0;
 	DIR dir;
-	if (lfs_dir_open(&dir, "/") != FR_OK) {
+	if (lfs_dir_open(&lfs, &dir, "/") != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
 	}
 
 	FILINFO finfo;
-	while (lfs_dir_read(&dir, &finfo) == FR_OK && finfo.fname[0] != '\0') {
+	while (lfs_dir_read(&lfs, &dir, &finfo) == FR_OK && finfo.fname[0] != '\0') {
 		root_dir_files++;
 	}
-	lfs_dir_close(&dir);
+	lfs_dir_close(&lfs, &dir);
 
 	char path[20];
 	sprintf(path, "/mov%04u.mjpg", root_dir_files);
-	r = lfs_file_open(&video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
+	r = lfs_file_open(&lfs, &video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
@@ -132,7 +132,7 @@ void video_start() {
 
 void video_stop() {
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET); // Set CAM_EN low
-	lfs_file_close(&video_file);
+	lfs_file_close(&lfs, &video_file);
 	state = VIDEO_OFF;
 }
 
@@ -163,7 +163,7 @@ bool video_capture_frame() {
 	HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT, (uint32_t)fb[capture_buf], BUF_SIZE);
 	// Write out write_buf while DMA is happening in the background
 	UINT retval;
-	FRESULT r = lfs_file_write(&video_file, fb[write_buf], length, &retval);
+	FRESULT r = lfs_file_write(&lfs, &video_file, fb[write_buf], length);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 	}
@@ -186,19 +186,19 @@ bool video_capture_frame() {
 
 void video_file_sync() {
 	// Write file metadata periodically to prevent loss of data on poweroff
-	FRESULT r = lfs_file_sync(&video_file);
+	FRESULT r = lfs_file_sync(&lfs, &video_file);
 	if (r != FR_OK) {
 		state = VIDEO_ERR_SD;
 		return;
 	}
 
 	// And switch to a new file to avoid FATFS 4Gb size limit
-	if (lfs_file_size(&video_file) >= MAX_FILE_SIZE) {
-		lfs_file_close(&video_file);
+	if (lfs_file_size(&lfs, &video_file) >= MAX_FILE_SIZE) {
+		lfs_file_close(&lfs, &video_file);
 
 		char path[20];
 		sprintf(path, "/mov%04u.mjpg", root_dir_files);
-		r = lfs_file_open(&video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
+		r = lfs_file_open(&lfs, &video_file, path, FA_WRITE | FA_CREATE_ALWAYS);
 		if (r != FR_OK) {
 			state = VIDEO_ERR_SD;
 			return;
